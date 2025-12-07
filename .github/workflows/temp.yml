@@ -139,7 +139,8 @@ jobs:
 
             # 3. Update DNS
             echo "🌐 Updating DuckDNS..."
-            curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip="
+           
+            curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=${{ needs.provision.outputs.instance_ip }}"
             
             # 4. Cleanup
             echo "🧹 Cleaning up..."
