@@ -35,13 +35,13 @@ jobs:
         id: get_ip
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=TechNova-Server-Terraform" \
+            --filters "Name=tag:Name,Values=major1-Server-Terraform" \
                       "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
           
           if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "No running or stopped instance found with tag 'TechNova-Server-Terraform'."
+            echo "No running or stopped instance found with tag 'major1-Server-Terraform'."
             exit 1
           fi
           
