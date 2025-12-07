@@ -138,25 +138,25 @@ jobs:
             docker volume create caddy_config
 
             # 4. Update DuckDNS
-            #  Using the specific IP from provision step ensures accuracy
-            # echo "🌐 Updating DNS..."
-            # curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=${{ needs.provision.outputs.instance_ip }}"
-            # Update DuckDNS
-            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-            echo "This server's Public IP is: $INSTANCE_IP"
-            echo "Updating DuckDNS for domain: ${{ secrets.DUCKDNS_DOMAIN }}"
+            # Using the specific IP from server metadata ensures accuracy
+            echo "🌐 Updating DNS..."
             
+            # Step A: Get the IP from AWS Metadata (The Truth)
+            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            echo "📍 Confirmed Server IP: $INSTANCE_IP"
+            
+            # Step B: Send it to DuckDNS
             DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=$INSTANCE_IP")
             
             if [ "$DUCKDNS_RESPONSE" = "OK" ]; then
               echo "✅ DuckDNS update successful!"
             else
-              echo "❌ ERROR: DuckDNS update failed. Response: $DUCKDNS_RESPONSE"
-              echo "Please check your DUCKDNS_DOMAIN and DUCKDNS_TOKEN secrets."
-              exit 1
+              echo "⚠️ WARNING: DuckDNS update failed. Response: $DUCKDNS_RESPONSE"
+              echo "Continuing deployment anyway..."
+              # We do NOT exit here, so the app still launches even if DNS is flaky
             fi
             
-            echo "Waiting 30 seconds for DNS propagation..."
+            echo "Waiting 10 seconds for DNS propagation..."
             sleep 30
 
 
