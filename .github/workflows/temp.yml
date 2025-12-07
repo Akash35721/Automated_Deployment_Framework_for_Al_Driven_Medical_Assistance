@@ -110,67 +110,75 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
-            echo "🚀 Starting Deployment on Server..."
-            
-            # 1. Install Docker (if missing) & Start it
-            # Using specific logic to ensure it runs
-            if ! command -v docker &> /dev/null; then
-                echo "Installing Docker..."
-                sudo apt-get update
-                sudo apt-get install -y docker.io
-            fi
+            echo "Ensuring Docker service is running..."
             sudo systemctl start docker
-            sudo systemctl enable docker
             
-            # 2. THE CRITICAL FIX: Force Socket Permissions
-            # This allows the 'ubuntu' user to run docker commands immediately
-            echo "🔧 Fixing Docker Socket permissions..."
-            sudo chmod 666 /var/run/docker.sock
-            
-            # Wait for Docker to be ready
-            echo "⏳ Waiting for Docker Daemon..."
+            echo "Waiting for Docker daemon to start..."
             for i in {1..30}; do
-              if docker info &> /dev/null; then 
-                echo "✅ Docker is  running!"
+              if sudo docker info &> /dev/null; then
+                echo "Docker daemon is running."
                 break
               fi
-              sleep 2
+              echo "Still waiting for Docker daemon... (attempt $i of 30)"
+              sleep 5
             done
-
-            # 3. Update DNS
-            echo "🌐 Updating DuckDNS..."
-           
-            curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=${{ needs.provision.outputs.instance_ip }}"
             
-            # 4. Cleanup
-            echo "🧹 Cleaning up..."
-            docker stop major1-app caddy 2>/dev/null || true
-            docker rm major1-app caddy 2>/dev/null || true
-            docker system prune -af
-
-            # 5. Deploy App
-            echo "⬇️ Pulling & Running App..."
+            if ! sudo docker info &> /dev/null; then
+              echo "FATAL: Docker daemon did not start in time."
+              exit 1
+            fi
+            
+            sudo chmod 666 /var/run/docker.sock
+            
+            # Update DuckDNS
+            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            echo "This server's Public IP is: $INSTANCE_IP"
+            echo "Updating DuckDNS for domain: ${{ secrets.DUCKDNS_DOMAIN }}"
+            
+            DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=")
+            
+            if [ "$DUCKDNS_RESPONSE" = "OK" ]; then
+              echo "✅ DuckDNS update successful!"
+            else
+              echo "❌ ERROR: DuckDNS update failed. Response: $DUCKDNS_RESPONSE"
+              echo "Please check your DUCKDNS_DOMAIN and DUCKDNS_TOKEN secrets."
+              exit 1
+            fi
+            
+            echo "Waiting 30 seconds for DNS propagation..."
+            sleep 30
+            
+            # Setup Docker network
+            docker network create major1_network 2>/dev/null || echo "Network major1_network already exists"
+            
+            # Stop and remove existing containers
+            docker stop major1-app 2>/dev/null || echo "Container major1-app was not running"
+            docker rm major1-app 2>/dev/null || echo "Container major1-app did not exist"
+            docker stop caddy 2>/dev/null || echo "Container caddy was not running"
+            docker rm caddy 2>/dev/null || echo "Container caddy did not exist"
+            
+            # Pull latest image
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
-            docker network create major1_network 2>/dev/null || true
             
+            # Run application container
             docker run -d \
               --network major1_network \
               --name major1-app \
               -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
               --restart always \
               ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
-
-            # 6. Deploy Caddy
+            
+            # Run Caddy reverse proxy
             docker run -d \
-              -p 80:80 -p 443:443 -p 443:443/udp \
+              -p 80:80 \
+              -p 443:443 \
+              -p 443:443/udp \
               --network major1_network \
               --name caddy \
               --restart always \
-              -v caddy_data:/data \
-              -v caddy_config:/config \
               caddy \
               caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
-
-            echo "✅ Deployment Success!"
+            
+            echo "✅ Deployment completed successfully!"
 
             
