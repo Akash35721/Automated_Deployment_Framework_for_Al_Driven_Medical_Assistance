@@ -70,7 +70,7 @@ resource "aws_instance" "major1_server" {
               sudo systemctl enable docker
               sudo usermod -aG docker ubuntu
               EOF
-  iam_instance_profile = aws_iam_instance_profile.major1_instance_profile.name //i am role attached for cloudwatch to send logs 
+  iam_instance_profile = aws_iam_instance_profile.major1_instance_profile.name
   tags = {
     Name = "major1-Server-Terraform"
   }
