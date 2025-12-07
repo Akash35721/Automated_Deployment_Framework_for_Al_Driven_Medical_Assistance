@@ -112,45 +112,61 @@ jobs:
           script: |
             echo "🚀 Starting Deployment on Server..."
             
-            # Ensure Docker is running
+            # 1. Install Docker (if missing) & Start it
+            # Using specific logic to ensure it runs
+            if ! command -v docker &> /dev/null; then
+                echo "Installing Docker..."
+                sudo apt-get update
+                sudo apt-get install -y docker.io
+            fi
             sudo systemctl start docker
+            sudo systemctl enable docker
             
-            # Update DNS (DuckDNS)
+            # 2. THE CRITICAL FIX: Force Socket Permissions
+            # This allows the 'ubuntu' user to run docker commands immediately
+            echo "🔧 Fixing Docker Socket permissions..."
+            sudo chmod 666 /var/run/docker.sock
+            
+            # Wait for Docker to be ready
+            echo "⏳ Waiting for Docker Daemon..."
+            for i in {1..30}; do
+              if docker info &> /dev/null; then 
+                echo "✅ Docker is running!"
+                break
+              fi
+              sleep 2
+            done
+
+            # 3. Update DNS
             echo "🌐 Updating DuckDNS..."
             curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip="
             
-            # Cleanup Old Containers
-            echo "🧹 Cleaning up old containers..."
-            docker stop major1-app caddy 2>/dev/null || true
-            docker rm major1-app caddy 2>/dev/null || true
-            
-            # CRITICAL: Prune old images to save disk space
-            echo "🗑️ Pruning old Docker images..."
+            # 4. Cleanup
+            echo "🧹 Cleaning up..."
+            docker stop technova-app caddy 2>/dev/null || true
+            docker rm technova-app caddy 2>/dev/null || true
             docker system prune -af
 
-            # Pull and Run App
-            echo "⬇️ Pulling latest image..."
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
+            # 5. Deploy App
+            echo "⬇️ Pulling & Running App..."
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+            docker network create technova_network 2>/dev/null || true
             
-            # Create Network
-            docker network create major1_network 2>/dev/null || true
-            
-            echo "▶️ Running App Container..."
             docker run -d \
-              --network major1_network \
-              --name major1-app \
+              --network technova_network \
+              --name technova-app \
               -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
               --restart always \
-              ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
 
-            # Run Caddy (HTTPS Proxy)
-            echo "🔒 Running Caddy Reverse Proxy..."
+            # 6. Deploy Caddy
+            echo "🔒 Running Caddy..."
             docker run -d \
               -p 80:80 -p 443:443 -p 443:443/udp \
-              --network major1_network \
+              --network technova_network \
               --name caddy \
               --restart always \
               caddy \
-              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
+              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
 
             echo "✅ Deployment Success!"
