@@ -88,3 +88,9 @@ resource "null_resource" "save_ip" {
     command = "echo ${aws_instance.major1_server.public_ip} > ip_address.txt"
   }
 }
+
+
+root_block_device {
+    volume_size = 20    # Size in GB
+    volume_type = "gp3" # General Purpose SSD
+  }
