@@ -2,8 +2,8 @@ terraform {
   # This block configures Terraform to store its state file remotely in an S3 bucket.
   # This is a best practice for collaboration and state management.
   backend "s3" {
-    bucket = "technova-tfstate-bucket-akash21357"
-    key    = "technova/terraform.tfstate"
+    bucket = "major1-tfstate-bucket-akash21357"
+    key    = "major1/terraform.tfstate"
     region = "ap-south-1"
   }
 }
@@ -14,8 +14,8 @@ provider "aws" {
 }
 
 # This resource defines the firewall rules (Security Group) for your server.
-resource "aws_security_group" "technova_sg" {
-  name        = "technova-instance-sg"
+resource "aws_security_group" "major1_sg" {
+  name        = "major1-instance-sg"
   description = "Allow SSH, HTTP, and HTTPS traffic"
 
   # Allow inbound SSH traffic on port 22 for remote management.
@@ -53,13 +53,13 @@ resource "aws_security_group" "technova_sg" {
 }
 
 # This resource defines the EC2 virtual server itself.
-resource "aws_instance" "technova_server" {
+resource "aws_instance" "major1_server" {
   ami           = "ami-0f918f7e67a3323f0"
   instance_type = "t2.micro"
-  key_name      = "technova-key" # Make sure this matches the name in your AWS Console
+  key_name      = "major1" # Make sure this matches the name in your AWS Console
   
   # This attaches the security group defined above to the EC2 instance.
-  vpc_security_group_ids = [aws_security_group.technova_sg.id]
+  vpc_security_group_ids = [aws_security_group.major1_sg.id]
 
   # This script runs on the server's first boot to install Docker.
   user_data = <<-EOF
@@ -70,9 +70,9 @@ resource "aws_instance" "technova_server" {
               sudo systemctl enable docker
               sudo usermod -aG docker ubuntu
               EOF
-  iam_instance_profile = aws_iam_instance_profile.technova_instance_profile.name //i am role attached for cloudwatch to send logs 
+  iam_instance_profile = aws_iam_instance_profile.major1_instance_profile.name //i am role attached for cloudwatch to send logs 
   tags = {
-    Name = "TechNova-Server-Terraform"
+    Name = "major1-Server-Terraform"
   }
 }
 
@@ -80,11 +80,11 @@ resource "aws_instance" "technova_server" {
 # Its only job is to get the IP address and save it to a file for the next job to use.
 resource "null_resource" "save_ip" {
   # This ensures the EC2 instance is fully created before this runs.
-  depends_on = [aws_instance.technova_server]
+  depends_on = [aws_instance.major1_server]
 
   # This runs on the GitHub  runner itself.
   provisioner "local-exec" {
     # This command writes the clean IP address into a file named ip_address.txt
-    command = "echo ${aws_instance.technova_server.public_ip} > ip_address.txt"
+    command = "echo ${aws_instance.major1_server.public_ip} > ip_address.txt"
   }
 }
