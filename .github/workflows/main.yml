@@ -1,0 +1,506 @@
+name: TechNova CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  provision:
+    name: 'Terraform Provisioning'
+    runs-on: ubuntu-latest
+    outputs:
+      instance_ip: ${{ steps.get_ip.outputs.ip }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+      - name: Ensure Instance is Running and Get IP
+        id: get_ip
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=TechNova-Server-Terraform" \
+                      "Name=instance-state-name,Values=running,stopped" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+          
+          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "No running or stopped instance found with tag 'TechNova-Server-Terraform'."
+            exit 1
+          fi
+          
+          echo "Found Instance ID: $INSTANCE_ID"
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+          
+          echo "Instance state is: $INSTANCE_STATE"
+          
+          if [ "$INSTANCE_STATE" == "stopped" ]; then
+            echo "Instance is stopped. Sending start command..."
+            aws ec2 start-instances --instance-ids $INSTANCE_ID
+            echo "Waiting for instance to enter 'running' state..."
+            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+            echo "Instance is now running."
+          elif [ "$INSTANCE_STATE" == "terminated" ]; then
+            echo "FATAL: The instance has been terminated. A new 'terraform apply' is required."
+            exit 1
+          fi
+          
+          ip_address=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+          
+          echo "Instance Public IP: $ip_address"
+          echo "ip=${ip_address}" >> $GITHUB_OUTPUT
+
+  sonarqube:
+    name: 'SonarQube Code Analysis'
+    runs-on: ubuntu-latest
+    outputs:
+      quality_gate_passed: ${{ steps.quality_gate.outputs.quality_gate_passed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Check Quality Gate Status
+        id: quality_gate
+        run: |
+          echo "Waiting for Quality Gate result..."
+          sleep 30
+          
+          QUALITY_GATE_STATUS=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" \
+            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=Akash35721_TechNova_CICDpipeline_devsecops" \
+            | jq -r '.projectStatus.status')
+          
+          echo "Quality Gate Status: $QUALITY_GATE_STATUS"
+          
+          if [ "$QUALITY_GATE_STATUS" = "OK" ]; then
+            echo "✅ Quality Gate PASSED - Deployment can proceed"
+            echo "quality_gate_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Quality Gate FAILED - Deployment will be blocked"
+            echo "quality_gate_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Send SonarQube Results via Email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "TechNova SonarQube Analysis - ${{ steps.quality_gate.outputs.quality_gate_passed == 'true' && '✅ PASSED' || '❌ FAILED' }}"
+          body: |
+            SonarQube analysis completed for commit ${{ github.sha }}
+            
+            🎯 Quality Gate Status: ${{ steps.quality_gate.outputs.quality_gate_passed == 'true' && 'PASSED ✅' || 'FAILED ❌' }}
+            
+            ${{ steps.quality_gate.outputs.quality_gate_passed == 'true' && '🚀 Deployment will proceed automatically.' || '🛑 Deployment has been BLOCKED due to quality issues.' }}
+            
+            📊 View detailed results: https://sonarcloud.io/project/overview?id=Akash35721_TechNova_CICDpipeline_devsecops
+            
+            📋 Repository: ${{ github.repository }}
+            🌿 Branch: ${{ github.ref_name }}
+            📝 Commit: ${{ github.sha }}
+            👤 Author: ${{ github.actor }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: TechNova CI/CD Pipeline
+
+  owasp-dependency-check:
+    name: 'OWASP Dependency Check'
+    runs-on: ubuntu-latest
+    outputs:
+      security_scan_passed: ${{ steps.process_results.outputs.security_scan_passed }}
+      vulnerabilities_found: ${{ steps.process_results.outputs.vulnerabilities_found }}
+      critical_vulnerabilities: ${{ steps.process_results.outputs.critical_vulnerabilities }}
+      high_vulnerabilities: ${{ steps.process_results.outputs.high_vulnerabilities }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run OWASP Dependency Check
+        id: dependency_check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'TechNova'
+          path: '.'
+          format: 'ALL'
+          args: >
+            --enableRetired
+            --enableExperimental
+            --failOnCVSS 7
+            --suppression suppression.xml
+        continue-on-error: true
+
+      - name: Process OWASP Results
+        id: process_results
+        run: |
+          echo "Processing OWASP Dependency Check results..."
+          
+          if [ -f "reports/dependency-check-report.json" ]; then
+            echo "JSON report found"
+            
+            HIGH_VULN=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity == "HIGH") | .name' reports/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            CRITICAL_VULN=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL") | .name' reports/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            MEDIUM_VULN=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity == "MEDIUM") | .name' reports/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            LOW_VULN=$(jq '.dependencies[]?.vulnerabilities[]? | select(.severity == "LOW") | .name' reports/dependency-check-report.json 2>/dev/null | wc -l || echo "0")
+            
+            TOTAL_VULN=$((HIGH_VULN + CRITICAL_VULN + MEDIUM_VULN + LOW_VULN))
+            
+            echo "Vulnerability Summary:"
+            echo "  🔴 Critical: $CRITICAL_VULN"
+            echo "  🟠 High: $HIGH_VULN"
+            echo "  🟡 Medium: $MEDIUM_VULN"
+            echo "  🔵 Low: $LOW_VULN"
+            echo "  📊 Total: $TOTAL_VULN"
+            
+            echo "vulnerabilities_found=$TOTAL_VULN" >> $GITHUB_OUTPUT
+            echo "critical_vulnerabilities=$CRITICAL_VULN" >> $GITHUB_OUTPUT
+            echo "high_vulnerabilities=$HIGH_VULN" >> $GITHUB_OUTPUT
+            echo "medium_vulnerabilities=$MEDIUM_VULN" >> $GITHUB_OUTPUT
+            echo "low_vulnerabilities=$LOW_VULN" >> $GITHUB_OUTPUT
+            
+            if [ "$CRITICAL_VULN" -gt 0 ] || [ "$HIGH_VULN" -gt 0 ]; then
+              echo "❌ Security scan FAILED - Critical or High vulnerabilities found"
+              echo "security_scan_passed=false" >> $GITHUB_OUTPUT
+            else
+              echo "✅ Security scan PASSED - No critical or high vulnerabilities"
+              echo "security_scan_passed=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ No dependency check report found"
+            echo "security_scan_passed=false" >> $GITHUB_OUTPUT
+            echo "vulnerabilities_found=unknown" >> $GITHUB_OUTPUT
+            echo "critical_vulnerabilities=0" >> $GITHUB_OUTPUT
+            echo "high_vulnerabilities=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload OWASP Dependency Check Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: reports/
+          retention-days: 30
+
+      - name: Send OWASP Results via Email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "TechNova OWASP Dependency Check - ${{ steps.process_results.outputs.security_scan_passed == 'true' && '✅ PASSED' || '❌ FAILED' }}"
+          body: |
+            OWASP Dependency Check completed for commit ${{ github.sha }}
+            
+            🔒 Security Scan Status: ${{ steps.process_results.outputs.security_scan_passed == 'true' && 'PASSED ✅' || 'FAILED ❌' }}
+            
+            📊 Vulnerability Summary:
+            🔴 Critical: ${{ steps.process_results.outputs.critical_vulnerabilities || '0' }}
+            🟠 High: ${{ steps.process_results.outputs.high_vulnerabilities || '0' }}
+            🟡 Medium: ${{ steps.process_results.outputs.medium_vulnerabilities || '0' }}
+            🔵 Low: ${{ steps.process_results.outputs.low_vulnerabilities || '0' }}
+            📈 Total: ${{ steps.process_results.outputs.vulnerabilities_found || '0' }}
+            
+            ${{ steps.process_results.outputs.security_scan_passed == 'true' && '🚀 No critical security issues found - Deployment can proceed.' || '🛑 Security vulnerabilities detected - Please review before deployment.' }}
+            
+            📋 Repository: ${{ github.repository }}
+            🌿 Branch: ${{ github.ref_name }}
+            📝 Commit: ${{ github.sha }}
+            👤 Author: ${{ github.actor }}
+            
+            View detailed reports in the GitHub Actions artifacts.
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: TechNova CI/CD Pipeline
+
+  deploy:
+    name: 'Build, Deploy, and Monitor'
+    runs-on: ubuntu-latest
+    needs: [provision, sonarqube, owasp-dependency-check]
+    if: needs.sonarqube.outputs.quality_gate_passed == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+
+      - name: Deploy to EC2 and Update DNS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ needs.provision.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "Ensuring Docker service is running..."
+            sudo systemctl start docker
+            
+            echo "Waiting for Docker daemon to start..."
+            for i in {1..30}; do
+              if sudo docker info &> /dev/null; then
+                echo "Docker daemon is running."
+                break
+              fi
+              echo "Still waiting for Docker daemon... (attempt $i of 30)"
+              sleep 5
+            done
+            
+            if ! sudo docker info &> /dev/null; then
+              echo "FATAL: Docker daemon did not start in time."
+              exit 1
+            fi
+            
+            sudo chmod 666 /var/run/docker.sock
+            
+            # Update DuckDNS
+            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            echo "This server's Public IP is: $INSTANCE_IP"
+            echo "Updating DuckDNS for domain: ${{ secrets.DUCKDNS_DOMAIN }}"
+            
+            DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=")
+            
+            if [ "$DUCKDNS_RESPONSE" = "OK" ]; then
+              echo "✅ DuckDNS update successful!"
+            else
+              echo "❌ ERROR: DuckDNS update failed. Response: $DUCKDNS_RESPONSE"
+              echo "Please check your DUCKDNS_DOMAIN and DUCKDNS_TOKEN secrets."
+              exit 1
+            fi
+            
+            echo "Waiting 30 seconds for DNS propagation..."
+            sleep 30
+            
+            # Setup Docker network
+            docker network create technova_network 2>/dev/null || echo "Network technova_network already exists"
+            
+            # Stop and remove existing containers
+            docker stop technova-app 2>/dev/null || echo "Container technova-app was not running"
+            docker rm technova-app 2>/dev/null || echo "Container technova-app did not exist"
+            docker stop caddy 2>/dev/null || echo "Container caddy was not running"
+            docker rm caddy 2>/dev/null || echo "Container caddy did not exist"
+            
+            # Pull latest image
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+            
+            # Run application container
+            docker run -d \
+              --network technova_network \
+              --name technova-app \
+              -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+              --restart always \
+              ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+            
+            # Run Caddy reverse proxy
+            docker run -d \
+              -p 80:80 \
+              -p 443:443 \
+              -p 443:443/udp \
+              --network technova_network \
+              --name caddy \
+              --restart always \
+              caddy \
+              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
+            
+            echo "✅ Deployment completed successfully!"
+
+      - name: Install and Configure CloudWatch Agent
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ needs.provision.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "Installing CloudWatch Agent..."
+            wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+            sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
+            
+            echo "Creating CloudWatch Agent configuration..."
+            sudo bash -c 'cat > /opt/aws/amazon-cloudwatch-agent/bin/config.json <<EOF
+            {
+              "agent": {
+                "run_as_user": "root"
+              },
+              "metrics": {
+                "metrics_collected": {
+                  "cpu": {
+                    "measurement": [
+                      "cpu_usage_idle",
+                      "cpu_usage_iowait",
+                      "cpu_usage_user",
+                      "cpu_usage_system"
+                    ],
+                    "metrics_collection_interval": 60,
+                    "total_cpu": true
+                  },
+                  "disk": {
+                    "measurement": [
+                      "used_percent",
+                      "inodes_free"
+                    ],
+                    "metrics_collection_interval": 60,
+                    "resources": [
+                      "/"
+                    ]
+                  },
+                  "mem": {
+                    "measurement": [
+                      "mem_used_percent"
+                    ],
+                    "metrics_collection_interval": 60
+                  }
+                },
+                "append_dimensions": {
+                  "InstanceId": "${aws:InstanceId}"
+                }
+              },
+              "logs": {
+                "logs_collected": {
+                  "files": {
+                    "collect_list": [
+                      {
+                        "file_path": "/var/lib/docker/containers/*/*.log",
+                        "log_group_name": "TechNova-App-Logs",
+                        "log_stream_name": "{instance_id}-docker"
+                      },
+                      {
+                        "file_path": "/var/log/auth.log",
+                        "log_group_name": "TechNova-Security-Logs",
+                        "log_stream_name": "{instance_id}-auth"
+                      },
+                      {
+                        "file_path": "/var/log/syslog",
+                        "log_group_name": "TechNova-System-Logs",
+                        "log_stream_name": "{instance_id}-syslog"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            EOF'
+            
+            echo "Starting CloudWatch Agent..."
+            sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+              -a fetch-config \
+              -m ec2 \
+              -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json \
+              -s
+            
+            echo "✅ CloudWatch Agent configured and started."
+
+      - name: Send Deployment Success Notification
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "🚀 TechNova Deployment Successful"
+          body: |
+            ✅ TechNova deployment completed successfully!
+            
+            🔒 Security Status:
+            ✅ SonarQube Quality Gate: PASSED
+            ${{ needs.owasp-dependency-check.outputs.security_scan_passed == 'true' && '✅' || '⚠️' }} OWASP Dependency Check: ${{ needs.owasp-dependency-check.outputs.security_scan_passed == 'true' && 'PASSED' || 'COMPLETED WITH WARNINGS' }}
+            ✅ Deployment: SUCCESSFUL
+            
+            🌐 Application URL: https://${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org
+            📊 Total Vulnerabilities: ${{ needs.owasp-dependency-check.outputs.vulnerabilities_found || '0' }}
+            🔴 Critical: ${{ needs.owasp-dependency-check.outputs.critical_vulnerabilities || '0' }}
+            🟠 High: ${{ needs.owasp-dependency-check.outputs.high_vulnerabilities || '0' }}
+            
+            📋 Repository: ${{ github.repository }}
+            🌿 Branch: ${{ github.ref_name }}
+            📝 Commit: ${{ github.sha }}
+            👤 Author: ${{ github.actor }}
+            
+            🎯 Deployment successful! Application is now live.
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: TechNova CI/CD Pipeline
+
+      - name: Send Deployment Failure Notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "❌ TechNova Deployment Failed"
+          body: |
+            ❌ TechNova deployment failed!
+            
+            📋 Repository: ${{ github.repository }}
+            🌿 Branch: ${{ github.ref_name }}
+            📝 Commit: ${{ github.sha }}
+            👤 Author: ${{ github.actor }}
+            
+            Please check the GitHub Actions logs for details:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: TechNova CI/CD Pipeline
