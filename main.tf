@@ -71,6 +71,10 @@ resource "aws_instance" "major1_server" {
               sudo usermod -aG docker ubuntu
               EOF
   iam_instance_profile = aws_iam_instance_profile.major1_instance_profile.name
+  root_block_device {
+    volume_size = 20    # Size in GB
+    volume_type = "gp3" # General Purpose SSD
+  }
   tags = {
     Name = "major1-Server-Terraform"
   }
@@ -90,7 +94,3 @@ resource "null_resource" "save_ip" {
 }
 
 
-root_block_device {
-    volume_size = 20    # Size in GB
-    volume_type = "gp3" # General Purpose SSD
-  }
