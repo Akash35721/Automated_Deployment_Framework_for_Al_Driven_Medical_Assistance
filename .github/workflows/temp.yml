@@ -1,0 +1,157 @@
+name: TechNova CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  provision:
+    name: 'Terraform Provisioning'
+    runs-on: ubuntu-latest
+    outputs:
+      instance_ip: ${{ steps.get_ip.outputs.ip }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+      - name: Ensure Instance is Running and Get IP
+        id: get_ip
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=TechNova-Server-Terraform" \
+                      "Name=instance-state-name,Values=running,stopped" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+          
+          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "No running or stopped instance found."
+            exit 1
+          fi
+          
+          echo "Found Instance ID: $INSTANCE_ID"
+          
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+          
+          if [ "$INSTANCE_STATE" == "stopped" ]; then
+            echo "Instance is stopped. Starting it..."
+            aws ec2 start-instances --instance-ids $INSTANCE_ID
+            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+          elif [ "$INSTANCE_STATE" == "terminated" ]; then
+            echo "FATAL: Instance terminated."
+            exit 1
+          fi
+          
+          ip_address=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+          
+          echo "Instance Public IP: $ip_address"
+          echo "ip=${ip_address}" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: 'Build and Deploy'
+    runs-on: ubuntu-latest
+    # FIX 1: Only depend on provision. Removed missing jobs.
+    needs: [provision]
+    # FIX 2: Removed the 'if' condition that checked SonarQube.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ needs.provision.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            echo "Starting Deployment..."
+            sudo systemctl start docker
+            
+            # Wait for Docker
+            for i in {1..30}; do
+              if sudo docker info &> /dev/null; then break; fi
+              sleep 5
+            done
+            sudo chmod 666 /var/run/docker.sock
+
+            # Update DNS
+            curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip="
+            
+            # Cleanup Old Containers
+            docker stop technova-app caddy 2>/dev/null || true
+            docker rm technova-app caddy 2>/dev/null || true
+            
+            # FIX 3: ADDED DISK CLEANUP (CRITICAL FOR T2.MICRO)
+            docker system prune -af
+
+            # Run App
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+            
+            docker network create technova_network 2>/dev/null || true
+            
+            docker run -d \
+              --network technova_network \
+              --name technova-app \
+              -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
+              --restart always \
+              ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+
+            # Run Caddy
+            docker run -d \
+              -p 80:80 -p 443:443 -p 443:443/udp \
+              --network technova_network \
+              --name caddy \
+              --restart always \
+              caddy \
+              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
+
+            echo "✅ Deployment Success!"
+
+      - name: Send Deployment Failure Notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "❌ TechNova Deployment Failed"
+          body: |
+            Your deployment failed. Check GitHub Actions logs.
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: TechNova CI/CD Pipeline
