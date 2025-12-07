@@ -138,7 +138,7 @@ jobs:
             docker volume create caddy_config
 
             # 4. Update DuckDNS
-            # # Using the specific IP from provision step ensures accuracy
+            #  Using the specific IP from provision step ensures accuracy
             # echo "🌐 Updating DNS..."
             # curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=${{ needs.provision.outputs.instance_ip }}"
             # Update DuckDNS
@@ -146,7 +146,7 @@ jobs:
             echo "This server's Public IP is: $INSTANCE_IP"
             echo "Updating DuckDNS for domain: ${{ secrets.DUCKDNS_DOMAIN }}"
             
-            DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=")
+            DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=$INSTANCE_IP")
             
             if [ "$DUCKDNS_RESPONSE" = "OK" ]; then
               echo "✅ DuckDNS update successful!"
