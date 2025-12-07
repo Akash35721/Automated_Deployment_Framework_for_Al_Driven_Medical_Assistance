@@ -1,6 +1,6 @@
 # Creates an IAM role for the EC2 instance
 resource "aws_iam_role" "major1_ec2_role" {
-  name = "major1-EC2-CloudWatch-combined-Role"
+  name = "major1-EC2-CloudWatch-combined-Role1"
 
   # The policy that allows EC2 to assume this role
   assume_role_policy = jsonencode({
