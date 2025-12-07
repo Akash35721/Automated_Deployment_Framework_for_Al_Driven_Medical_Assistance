@@ -143,32 +143,32 @@ jobs:
             
             # 4. Cleanup
             echo "🧹 Cleaning up..."
-            docker stop technova-app caddy 2>/dev/null || true
-            docker rm technova-app caddy 2>/dev/null || true
+            docker stop major1-app caddy 2>/dev/null || true
+            docker rm major1-app caddy 2>/dev/null || true
             docker system prune -af
 
             # 5. Deploy App
             echo "⬇️ Pulling & Running App..."
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
-            docker network create technova_network 2>/dev/null || true
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
+            docker network create major1_network 2>/dev/null || true
             
             docker run -d \
-              --network technova_network \
-              --name technova-app \
+              --network major1_network \
+              --name major1-app \
               -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
               --restart always \
-              ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
 
             # 6. Deploy Caddy
             docker run -d \
               -p 80:80 -p 443:443 -p 443:443/udp \
-              --network technova_network \
+              --network major1_network \
               --name caddy \
               --restart always \
               -v caddy_data:/data \
               -v caddy_config:/config \
               caddy \
-              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
+              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
 
             echo "✅ Deployment Success!"
 
