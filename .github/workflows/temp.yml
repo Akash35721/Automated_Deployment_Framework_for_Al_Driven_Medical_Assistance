@@ -110,75 +110,72 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
-            echo "Ensuring Docker service is running..."
-            sudo systemctl start docker
+            echo "🚀 Starting Deployment..."
             
-            echo "Waiting for Docker daemon to start..."
-            for i in {1..30}; do
-              if sudo docker info &> /dev/null; then
-                echo "Docker daemon is running."
-                break
-              fi
-              echo "Still waiting for Docker daemon... (attempt $i of 30)"
-              sleep 5
-            done
-            
-            if ! sudo docker info &> /dev/null; then
-              echo "FATAL: Docker daemon did not start in time."
-              exit 1
+            # 1. Install & Start Docker (Logic from your trusted script)
+            if ! command -v docker &> /dev/null; then
+                echo "Installing Docker..."
+                sudo apt-get update
+                sudo apt-get install -y docker.io
             fi
+            sudo systemctl start docker
+            sudo systemctl enable docker
             
+            # 2. CRITICAL FIX: Grant immediate access to Docker socket
+            # This is the "magic command" that fixes the permission error instantly
+            echo "🔧 Fixing Docker Socket permissions..."
             sudo chmod 666 /var/run/docker.sock
             
-            # Update DuckDNS
-            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-            echo "This server's Public IP is: $INSTANCE_IP"
-            echo "Updating DuckDNS for domain: ${{ secrets.DUCKDNS_DOMAIN }}"
+            # Wait for Docker Daemon to be ready
+            echo "⏳ Waiting for Docker..."
+            for i in {1..30}; do
+              if docker info &> /dev/null; then break; fi
+              sleep 2
+            done
+
+            # 3. Create Persistent Volumes for Caddy (Fixes SSL Error)
+            docker volume create caddy_data
+            docker volume create caddy_config
+
+            # 4. Update DuckDNS
+            # Using the specific IP from provision step ensures accuracy
+            echo "🌐 Updating DNS..."
+            curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=${{ needs.provision.outputs.instance_ip }}"
             
-            DUCKDNS_RESPONSE=$(curl -s "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip=")
-            
-            if [ "$DUCKDNS_RESPONSE" = "OK" ]; then
-              echo "✅ DuckDNS update successful!"
-            else
-              echo "❌ ERROR: DuckDNS update failed. Response: $DUCKDNS_RESPONSE"
-              echo "Please check your DUCKDNS_DOMAIN and DUCKDNS_TOKEN secrets."
-              exit 1
-            fi
-            
-            echo "Waiting 30 seconds for DNS propagation..."
-            sleep 30
-            
-            # Setup Docker network
-            docker network create major1_network 2>/dev/null || echo "Network major1_network already exists"
-            
-            # Stop and remove existing containers
-            docker stop major1-app 2>/dev/null || echo "Container major1-app was not running"
-            docker rm major1-app 2>/dev/null || echo "Container major1-app did not exist"
-            docker stop caddy 2>/dev/null || echo "Container caddy was not running"
-            docker rm caddy 2>/dev/null || echo "Container caddy did not exist"
-            
-            # Pull latest image
+            # 5. Cleanup Old Containers & Images
+            echo "🧹 Cleaning up..."
+            # Note: Changed container names to major1-app
+            docker stop major1-app caddy 2>/dev/null || true
+            docker rm major1-app caddy 2>/dev/null || true
+            docker system prune -af
+
+            # 6. Pull & Run App
+            echo "⬇️ Pulling App Image..."
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
             
-            # Run application container
+            # Note: Changed network name to major1_network
+            docker network create major1_network 2>/dev/null || true
+            
+            echo "▶️ Running App..."
             docker run -d \
               --network major1_network \
               --name major1-app \
               -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
               --restart always \
               ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
-            
-            # Run Caddy reverse proxy
+
+            # 7. Run Caddy (HTTPS) with Persistence
+            echo "🔒 Running Caddy..."
             docker run -d \
-              -p 80:80 \
-              -p 443:443 \
-              -p 443:443/udp \
+              -p 80:80 -p 443:443 -p 443:443/udp \
               --network major1_network \
               --name caddy \
               --restart always \
+              -v caddy_data:/data \
+              -v caddy_config:/config \
               caddy \
               caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
-            
-            echo "✅ Deployment completed successfully!"
+
+            echo "✅ Deployment Success!"
 
             
