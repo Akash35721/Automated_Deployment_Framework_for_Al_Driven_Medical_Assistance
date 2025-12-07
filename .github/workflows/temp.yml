@@ -131,7 +131,7 @@ jobs:
             echo "⏳ Waiting for Docker Daemon..."
             for i in {1..30}; do
               if docker info &> /dev/null; then 
-                echo "✅ Docker is running!"
+                echo "✅ Docker is  running!"
                 break
               fi
               sleep 2
