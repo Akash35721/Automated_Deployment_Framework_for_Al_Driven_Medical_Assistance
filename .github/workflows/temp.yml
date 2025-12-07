@@ -1,4 +1,4 @@
-name: TechNova CI/CD Pipeline
+name: major1 CI/CD Pipeline
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
         id: get_ip
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=TechNova-Server-Terraform" \
+            --filters "Name=tag:Name,Values=major1-Server-Terraform" \
                       "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
@@ -90,7 +90,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
@@ -113,32 +113,32 @@ jobs:
             curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip="
             
             # Cleanup Old Containers
-            docker stop technova-app caddy 2>/dev/null || true
-            docker rm technova-app caddy 2>/dev/null || true
+            docker stop major1-app caddy 2>/dev/null || true
+            docker rm major1-app caddy 2>/dev/null || true
             
             # FIX 3: ADDED DISK CLEANUP (CRITICAL FOR T2.MICRO)
             docker system prune -af
 
             # Run App
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
             
-            docker network create technova_network 2>/dev/null || true
+            docker network create major1_network 2>/dev/null || true
             
             docker run -d \
-              --network technova_network \
-              --name technova-app \
+              --network major1_network \
+              --name major1-app \
               -e GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} \
               --restart always \
-              ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
+              ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
 
             # Run Caddy
             docker run -d \
               -p 80:80 -p 443:443 -p 443:443/udp \
-              --network technova_network \
+              --network major1_network \
               --name caddy \
               --restart always \
               caddy \
-              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
+              caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
 
             echo "✅ Deployment Success!"
 
@@ -150,8 +150,8 @@ jobs:
           server_port: 587
           username: ${{ secrets.GMAIL_USERNAME }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "❌ TechNova Deployment Failed"
+          subject: "❌ major1 Deployment Failed"
           body: |
             Your deployment failed. Check GitHub Actions logs.
           to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: TechNova CI/CD Pipeline
+          from: major1 CI/CD Pipeline
