@@ -31,50 +31,61 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
 
-      - name: Ensure Instance is Running and Get IP
+      - name: Get Instance IP
         id: get_ip
         run: |
+          echo "🔍 Searching for instance in ap-south-1..."
+          
+          # Find the Instance ID (regardless of state)
           INSTANCE_ID=$(aws ec2 describe-instances \
+            --region ap-south-1 \
             --filters "Name=tag:Name,Values=major1-Server-Terraform" \
-                      "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
           
+          # Check if instance exists
           if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "No running or stopped instance found."
-            exit 1
+             echo "❌ ERROR: Instance with tag 'major1-Server-Terraform' not found in ap-south-1."
+             exit 1
           fi
-          
-          echo "Found Instance ID: $INSTANCE_ID"
-          
+
+          echo "✅ Found Instance ID: $INSTANCE_ID"
+
+          # Check state and start if stopped
           INSTANCE_STATE=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_ID \
+            --region ap-south-1 \
             --query "Reservations[0].Instances[0].State.Name" \
             --output text)
+            
+          echo "Current State: $INSTANCE_STATE"
           
           if [ "$INSTANCE_STATE" == "stopped" ]; then
-            echo "Instance is stopped. Starting it..."
-            aws ec2 start-instances --instance-ids $INSTANCE_ID
-            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+            echo "🚀 Instance is stopped. Starting it now..."
+            aws ec2 start-instances --instance-ids $INSTANCE_ID --region ap-south-1
           elif [ "$INSTANCE_STATE" == "terminated" ]; then
-            echo "FATAL: Instance terminated."
+            echo "💀 FATAL: Instance is terminated. Terraform needs to re-create it."
             exit 1
           fi
+
+          # Wait for it to be fully running (handles pending/booting states)
+          echo "⏳ Waiting for instance to reach 'running' state..."
+          aws ec2 wait instance-running --instance-ids $INSTANCE_ID --region ap-south-1
           
-          ip_address=$(aws ec2 describe-instances \
+          # Get the Public IP
+          IP=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_ID \
+            --region ap-south-1 \
             --query "Reservations[0].Instances[0].PublicIpAddress" \
             --output text)
-          
-          echo "Instance Public IP: $ip_address"
-          echo "ip=${ip_address}" >> $GITHUB_OUTPUT
+            
+          echo "✅ Instance Public IP: $IP"
+          echo "ip=${IP}" >> $GITHUB_OUTPUT
 
   deploy:
     name: 'Build and Deploy'
     runs-on: ubuntu-latest
-    # FIX 1: Only depend on provision. Removed missing jobs.
     needs: [provision]
-    # FIX 2: Removed the 'if' condition that checked SonarQube.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -99,31 +110,32 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
-            echo "Starting Deployment..."
+            echo "🚀 Starting Deployment on Server..."
+            
+            # Ensure Docker is running
             sudo systemctl start docker
             
-            # Wait for Docker
-            for i in {1..30}; do
-              if sudo docker info &> /dev/null; then break; fi
-              sleep 5
-            done
-            sudo chmod 666 /var/run/docker.sock
-
-            # Update DNS
+            # Update DNS (DuckDNS)
+            echo "🌐 Updating DuckDNS..."
             curl "https://www.duckdns.org/update?domains=${{ secrets.DUCKDNS_DOMAIN }}&token=${{ secrets.DUCKDNS_TOKEN }}&ip="
             
             # Cleanup Old Containers
+            echo "🧹 Cleaning up old containers..."
             docker stop major1-app caddy 2>/dev/null || true
             docker rm major1-app caddy 2>/dev/null || true
             
-            # FIX 3: ADDED DISK CLEANUP (CRITICAL FOR T2.MICRO)
+            # CRITICAL: Prune old images to save disk space
+            echo "🗑️ Pruning old Docker images..."
             docker system prune -af
 
-            # Run App
+            # Pull and Run App
+            echo "⬇️ Pulling latest image..."
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
             
+            # Create Network
             docker network create major1_network 2>/dev/null || true
             
+            echo "▶️ Running App Container..."
             docker run -d \
               --network major1_network \
               --name major1-app \
@@ -131,7 +143,8 @@ jobs:
               --restart always \
               ${{ secrets.DOCKERHUB_USERNAME }}/major1-app:latest
 
-            # Run Caddy
+            # Run Caddy (HTTPS Proxy)
+            echo "🔒 Running Caddy Reverse Proxy..."
             docker run -d \
               -p 80:80 -p 443:443 -p 443:443/udp \
               --network major1_network \
@@ -141,17 +154,3 @@ jobs:
               caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to major1-app:80
 
             echo "✅ Deployment Success!"
-
-      - name: Send Deployment Failure Notification
-        if: failure()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "❌ major1 Deployment Failed"
-          body: |
-            Your deployment failed. Check GitHub Actions logs.
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: major1 CI/CD Pipeline
