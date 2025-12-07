@@ -160,13 +160,16 @@ jobs:
               ${{ secrets.DOCKERHUB_USERNAME }}/technova-app:latest
 
             # 6. Deploy Caddy
-            echo "🔒 Running Caddy..."
             docker run -d \
               -p 80:80 -p 443:443 -p 443:443/udp \
               --network technova_network \
               --name caddy \
               --restart always \
+              -v caddy_data:/data \
+              -v caddy_config:/config \
               caddy \
               caddy reverse-proxy --from ${{ secrets.DUCKDNS_DOMAIN }}.duckdns.org --to technova-app:80
 
             echo "✅ Deployment Success!"
+
+            
