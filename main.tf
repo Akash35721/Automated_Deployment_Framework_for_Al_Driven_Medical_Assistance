@@ -1,6 +1,7 @@
 terraform {
   # This block configures Terraform to store its state file remotely in an S3 bucket.
   # This is a best practice for collaboration and state management.
+#add comm for greplit trigger
   backend "s3" {
     bucket = "major1-tfstate-bucket-akash21357"
     key    = "major1/terraform.tfstate"
