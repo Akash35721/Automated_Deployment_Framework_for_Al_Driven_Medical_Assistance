@@ -1,0 +1,22 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "security", "performance", "maintainability"],
+  "ignorePatterns": [
+    "**/*.pt", 
+    "**/*.tfstate",
+    "**/*.tfstate.backup",
+    "venv/**",
+    "__pycache__/**"
+  ],
+  "triggerOnUpdates": true,
+  "customContext": [
+    {
+      "files": ["main.tf", "iam.tf"],
+      "description": "Terraform infrastructure for medical assistance deployment. Strictly enforce IAM least-privilege policies."
+    },
+    {
+      "files": ["app_with_followup.py"],
+      "description": "Main Python application logic. Ensure strict error handling for medical data processing."
+    }
+  ]
+}
