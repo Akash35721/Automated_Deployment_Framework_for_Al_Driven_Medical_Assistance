@@ -1,1 +1,17 @@
-Testing file for greptile
+<!DOCTYPE html>
+<html>
+<head>
+  <title>XSS Example</title>
+</head>
+<body>
+  <div>
+    <!-- Imagine this data comes from user input or an untrusted source -->
+    <p>User's comment: <script>alert('Testing file for greptile
+')</script></p>
+  </div>
+  <!-- This user input is not properly sanitized -->
+  <div>
+    <p>User's comment: <?php echo $_GET['comment']; ?></p>
+</div>
+</body>
+</html>
