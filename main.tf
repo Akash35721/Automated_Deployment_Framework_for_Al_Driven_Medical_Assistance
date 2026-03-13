@@ -14,8 +14,13 @@ provider "aws" {
 }
 
 # This resource defines the firewall rules (Security Group) for your server.
+<<<<<<< HEAD
 resource "aws_security_group" "major2357_sg" {
   name        = "major2357-instance-sg"
+=======
+resource "aws_security_group" "major2_sg" {
+  name        = "major2-instance-sg"
+>>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
   description = "Allow SSH, HTTP, and HTTPS traffic"
 
   # Allow inbound SSH traffic on port 22 for remote management.
@@ -53,6 +58,7 @@ resource "aws_security_group" "major2357_sg" {
 }
 
 # This resource defines the EC2 virtual server itself.
+<<<<<<< HEAD
 resource "aws_instance" "major2357_server" {
   ami           = "ami-0f918f7e67a3323f0"
   instance_type = "t2.micro"
@@ -60,6 +66,15 @@ resource "aws_instance" "major2357_server" {
   
   # This attaches the security group defined above to the EC2 instance.
   vpc_security_group_ids = [aws_security_group.major2357_sg.id]
+=======
+resource "aws_instance" "major2_server" {
+  ami           = "ami-0f918f7e67a3323f0"
+  instance_type = "t2.large"
+  key_name      = "major1" 
+  
+  # This attaches the security group defined above to the EC2 instance.
+  vpc_security_group_ids = [aws_security_group.major2_sg.id]
+>>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
 
   # This script runs on the server's first boot to install Docker.
   user_data = <<-EOF
@@ -70,9 +85,19 @@ resource "aws_instance" "major2357_server" {
               sudo systemctl enable docker
               sudo usermod -aG docker ubuntu
               EOF
+<<<<<<< HEAD
   iam_instance_profile = aws_iam_instance_profile.major2357_instance_profile.name
   tags = {
     Name = "major2357-Server-Terraform"
+=======
+  iam_instance_profile = aws_iam_instance_profile.major2_instance_profile.name
+  root_block_device {
+    volume_size = 20    # Size in GB
+    volume_type = "gp3" # General Purpose SSD
+  }
+  tags = {
+    Name = "major2-Server-Terraform"
+>>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
   }
 }
 
@@ -80,11 +105,24 @@ resource "aws_instance" "major2357_server" {
 # Its only job is to get the IP address and save it to a file for the next job to use.
 resource "null_resource" "save_ip" {
   # This ensures the EC2 instance is fully created before this runs.
+<<<<<<< HEAD
   depends_on = [aws_instance.major2357_server]
+=======
+  depends_on = [aws_instance.major2_server]
+>>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
 
   # This runs on the GitHub  runner itself.
   provisioner "local-exec" {
     # This command writes the clean IP address into a file named ip_address.txt
+<<<<<<< HEAD
     command = "echo ${aws_instance.major2357_server.public_ip} > ip_address.txt"
+=======
+    command = "echo ${aws_instance.major2_server.public_ip} > ip_address.txt"
+>>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
   }
+}
+
+output "instance_public_ip" {
+  description = "Public IP address of the EC2 instance"
+  value       = aws_instance.major2_server.public_ip
 }

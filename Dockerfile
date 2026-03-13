@@ -1,27 +1,28 @@
-# Use a slim Python image to keep size down
-FROM python:3.10-slim
+# Use a stable slim version
+FROM python:3.10-slim-bookworm
 
-# Install system dependencies required for OpenCV (used by Ultralytics)
+# Install system dependencies
+# libgl1  <-- FIXES ImportError: libGL.so.1
+# libglib2.0-0 <-- Required by OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy requirements first (better caching)
+# Copy requirements first
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install CPU-only PyTorch (Keep this to save space)
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Install other dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of your application code
+# Copy application code
 COPY . .
 
-# Environment variables should be passed at runtime, NOT hardcoded here
-# But we can set a default host if needed
 ENV PYTHONUNBUFFERED=1
 
-# Command to run the bot
 CMD ["python", "app_with_followup.py"]
