@@ -2,8 +2,8 @@ terraform {
   # This block configures Terraform to store its state file remotely in an S3 bucket.
   # This is a best practice for collaboration and state management.
   backend "s3" {
-    bucket = "major1-tfstate-bucket-akash21357"
-    key    = "major1/terraform.tfstate"
+    bucket = "major2-tfstate-bucket-akash21357"
+    key    = "major2/terraform.tfstate"
     region = "ap-south-1"
   }
 }
@@ -58,7 +58,7 @@ resource "aws_security_group" "major2357_sg" {
 
 resource "aws_instance" "major2357_server" {
   ami           = "ami-0f918f7e67a3323f0"
-  instance_type = "t2.micro"
+  instance_type = "t2.large"
   key_name      = "major2357" # Make sure this matches the name in your AWS Console
   
   # This attaches the security group defined above to the EC2 instance.
