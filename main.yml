@@ -34,7 +34,7 @@ jobs:
       - name: Ensure Instance is Running and Get IP
         id: get_ip
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
+          INSTANCE_ID=$(aws ec2 describe-instances --region ap-south-1 \
             --filters "Name=tag:Name,Values=major2-Server-Terraform" \
                       "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
@@ -46,8 +46,7 @@ jobs:
           fi
           
           echo "Found Instance ID: $INSTANCE_ID"
-          
-          INSTANCE_STATE=$(aws ec2 describe-instances \
+          INSTANCE_STATE=$(aws ec2 describe-instances --region ap-south-1 \
             --instance-ids $INSTANCE_ID \
             --query "Reservations[0].Instances[0].State.Name" \
             --output text)
@@ -56,16 +55,15 @@ jobs:
           
           if [ "$INSTANCE_STATE" == "stopped" ]; then
             echo "Instance is stopped. Sending start command..."
-            aws ec2 start-instances --instance-ids $INSTANCE_ID
+            aws ec2 start-instances --region ap-south-1 --instance-ids $INSTANCE_ID
             echo "Waiting for instance to enter 'running' state..."
-            aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+            aws ec2 wait instance-running --region ap-south-1 --instance-ids $INSTANCE_ID
             echo "Instance is now running."
           elif [ "$INSTANCE_STATE" == "terminated" ]; then
             echo "FATAL: The instance has been terminated. A new 'terraform apply' is required."
             exit 1
           fi
-          
-          ip_address=$(aws ec2 describe-instances \
+          ip_address=$(aws ec2 describe-instances --region ap-south-1 \
             --instance-ids $INSTANCE_ID \
             --query "Reservations[0].Instances[0].PublicIpAddress" \
             --output text)
