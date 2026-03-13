@@ -1,6 +1,6 @@
 # Creates an IAM role for the EC2 instance
-resource "aws_iam_role" "major1_ec2_role" {
-  name = "major1-EC2-Role1"
+resource "aws_iam_role" "major2_ec2_role" {
+  name = "major2-EC2-Role"
 
   # The policy that allows EC2 to assume this role
   assume_role_policy = jsonencode({
@@ -18,6 +18,6 @@ resource "aws_iam_role" "major1_ec2_role" {
 }
 # Creates an instance profile that can be associated with the EC2 instance
 resource "aws_iam_instance_profile" "major1_instance_profile" {
-  name = "major1-EC2-Instance-Profile1"
-  role = aws_iam_role.major1_ec2_role.name
+  name = "major2-EC2-Instance-Profile"
+  role = aws_iam_role.major2_ec2_role.name
 }
