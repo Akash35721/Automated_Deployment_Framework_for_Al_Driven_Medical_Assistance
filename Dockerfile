@@ -2,12 +2,14 @@
 FROM python:3.10-slim-bookworm
 
 # Install system dependencies
+
 # libgl1  <-- FIXES ImportError: libGL.so.1
 # libglib2.0-0 <-- Required by OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+    #add comm for greplit trigger2
 
 WORKDIR /app
 
@@ -26,3 +28,6 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "app_with_followup.py"]
+
+
+#@greptileai review
