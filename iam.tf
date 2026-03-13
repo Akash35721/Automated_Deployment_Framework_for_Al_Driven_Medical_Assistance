@@ -17,7 +17,7 @@ resource "aws_iam_role" "major2_ec2_role" {
   })
 }
 # Creates an instance profile that can be associated with the EC2 instance
-resource "aws_iam_instance_profile" "major1_instance_profile" {
+resource "aws_iam_instance_profile" "major2_instance_profile" {
   name = "major2-EC2-Instance-Profile"
   role = aws_iam_role.major2_ec2_role.name
 }
