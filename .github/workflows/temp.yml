@@ -34,16 +34,13 @@ jobs:
       - name: Get Instance IP
         id: get_ip
         run: |
-<<<<<<< HEAD
-          # Fetch the Instance ID based on the Tag Name
+
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=major2357-Server-Terraform" \
                       "Name=instance-state-name,Values=running,stopped" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
-=======
-          ip_address=$(terraform output -raw instance_public_ip)
->>>>>>> 22731154287d3879e31b0a411e6d6bcbabdc19ba
+
           
           if [ -z "$ip_address" ]; then
             echo "FATAL: Terraform output instance_public_ip is empty!"
