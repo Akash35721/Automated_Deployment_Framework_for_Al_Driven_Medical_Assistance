@@ -1,6 +1,6 @@
 # app_with_followup.py
 # Telegram bot that processes brain tumour images with YOLOv8,
-# explains them via Google Gemini API, and handles follow-up questions.
+# explains them via Goog le Gemini API, and handles follow-up questions.
 
 import os
 import tempfile
