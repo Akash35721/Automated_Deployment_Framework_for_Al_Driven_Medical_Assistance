@@ -55,8 +55,8 @@ resource "aws_security_group" "major1_sg" {
 # This resource defines the EC2 virtual server itself.
 resource "aws_instance" "major1_server" {
   ami           = "ami-0f918f7e67a3323f0"
-  instance_type = "t2.micro"
-  key_name      = "major1" # Make sure this matches the name in your AWS Console
+  instance_type = "t2.large"
+  key_name      = "major1" 
   
   # This attaches the security group defined above to the EC2 instance.
   vpc_security_group_ids = [aws_security_group.major1_sg.id]
