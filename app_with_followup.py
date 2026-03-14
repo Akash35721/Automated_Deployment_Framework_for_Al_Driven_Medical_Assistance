@@ -126,13 +126,13 @@ def annotate_image(image_bytes: bytes, boxes_data: list, class_names: dict, font
 async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(
         ":>) Hello! Send me a brain tumour image (like an MRI scan). "
-        "I'll use YOLOv8 to detect tumours and Gemini AI to explain the findings."
+        "I'll use YOLOv8 to detect tumours and AI to explain the findings."
     )
     context.chat_data.pop('last_analysis_context', None)
 
 
 async def handle_image(update: Update, context: CallbackContext) -> None:
-    """Handles incoming photos, runs YOLO, annotates, sends to Gemini, and stores context."""
+    """Handles incoming photos, runs YOLO, annotates, sends to AI, and stores context."""
     if not update.message.photo:
         return
 
@@ -193,7 +193,7 @@ async def handle_image(update: Update, context: CallbackContext) -> None:
         # 7. Call Gemini for Explanation
         explanation = None
         if detections_found and gemini_model:
-            status_message = await update.message.reply_text("??? Analyzing with Gemini AI...")
+            status_message = await update.message.reply_text("??? Analyzing with AI...")
             
             prompt_for_gemini = f"""You are an analytical assistant reviewing a medical brain scan.
             
@@ -216,7 +216,7 @@ async def handle_image(update: Update, context: CallbackContext) -> None:
                 response = gemini_model.generate_content([prompt_for_gemini, pil_image])
                 explanation = response.text
                 
-                logger.info("Gemini analysis successful.")
+                logger.info("AI analysis successful.")
                 await status_message.edit_text(explanation + "\n\n*You can ask one follow-up question.*")
 
             except Exception as e:
@@ -245,7 +245,7 @@ async def handle_image(update: Update, context: CallbackContext) -> None:
 
 
 async def handle_generic_message(update: Update, context: CallbackContext) -> None:
-    """Handles text messages as follow-ups using Gemini."""
+    """Handles text messages as follow-ups using AI."""
     user_message = update.message.text
     chat_id = update.effective_chat.id
     last_context = context.chat_data.get('last_analysis_context')
@@ -260,7 +260,7 @@ async def handle_generic_message(update: Update, context: CallbackContext) -> No
         # Clear context (allow only one follow-up)
         context.chat_data.pop('last_analysis_context')
 
-        status_message = await update.message.reply_text("??? Processing follow-up with Gemini...")
+        status_message = await update.message.reply_text("??? Processing follow-up with AI...")
         
         tmpdir_followup = tempfile.mkdtemp()
         followup_img_path = os.path.join(tmpdir_followup, "followup.jpg")
