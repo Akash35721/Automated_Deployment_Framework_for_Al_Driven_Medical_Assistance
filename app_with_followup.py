@@ -303,7 +303,20 @@ async def handle_generic_message(update: Update, context: CallbackContext) -> No
             shutil.rmtree(tmpdir_followup, ignore_errors=True)
     else:
         await update.message.reply_text("Please send a brain MRI image first.")
+async def help_command(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text(
+        "🩺 *Medical AI Assistant Help*\n\n"
+        "1. Send me a clear picture of a brain MRI/CT scan.\n"
+        "2. Wait a moment while our YOLOv8 model detects potential anomalies.\n"
+        "3. Read the Gemini AI analysis.\n"
+        "4. Reply with any follow-up questions you have about the results!\n\n"
+        "Type /clear to reset the conversation at any time.",
+        parse_mode='Markdown'
+    )
 
+async def clear_command(update: Update, context: CallbackContext) -> None:
+    context.chat_data.pop('last_analysis_context', None)
+    await update.message.reply_text("🧹 Conversation context cleared! Ready for a new scan.")
 # --- Main Function ---
 def main() -> None:
     if not TELEGRAM_BOT_TOKEN:
@@ -315,6 +328,9 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.PHOTO, handle_image))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_generic_message))
+    
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("clear", clear_command))
 
     logger.info("Bot started...")
     application.run_polling()
