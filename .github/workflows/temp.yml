@@ -52,11 +52,16 @@ jobs:
       - name: Get Instance IP
         id: get_ip
         run: |
-          # Grab the IP address directly from Terraform's output
-          ip_address=$(terraform output -raw instance_public_ip)
+          # Fetch the Public IP directly from AWS using the instance Name tag
+          ip_address=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=major2357-Server-Terraform" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
           
-          if [ -z "$ip_address" ]; then
-            echo "FATAL: Terraform output instance_public_ip is empty!"
+          # Check if we successfully got an IP
+          if [ -z "$ip_address" ] || [ "$ip_address" == "None" ]; then
+            echo "FATAL: Could not fetch IP address from AWS!"
             exit 1
           fi
           
