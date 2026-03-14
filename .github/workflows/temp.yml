@@ -31,16 +31,29 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve
 
+      # - name: Get Instance IP
+      #   id: get_ip
+      #   run: |
+
+      #     INSTANCE_ID=$(aws ec2 describe-instances \
+      #       --filters "Name=tag:Name,Values=major2357-Server-Terraform" \
+      #                 "Name=instance-state-name,Values=running,stopped" \
+      #       --query "Reservations[0].Instances[0].InstanceId" \
+      #       --output text)
+
+          
+      #     if [ -z "$ip_address" ]; then
+      #       echo "FATAL: Terraform output instance_public_ip is empty!"
+      #       exit 1
+      #     fi
+          
+      #     echo "Instance Public IP: $ip_address"
+      #     echo "ip=${ip_address}" >> $GITHUB_OUTPUT
       - name: Get Instance IP
         id: get_ip
         run: |
-
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=major2357-Server-Terraform" \
-                      "Name=instance-state-name,Values=running,stopped" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)
-
+          # Grab the IP address directly from Terraform's output
+          ip_address=$(terraform output -raw instance_public_ip)
           
           if [ -z "$ip_address" ]; then
             echo "FATAL: Terraform output instance_public_ip is empty!"
@@ -48,7 +61,7 @@ jobs:
           fi
           
           echo "Instance Public IP: $ip_address"
-          echo "ip=${ip_address}" >> $GITHUB_OUTPUT
+          echo "ip=${ip_address}" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: 'Build and Deploy'
